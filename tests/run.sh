@@ -42,6 +42,31 @@ assert_contains() {
   }
 }
 
+assert_headings_match() {
+  local en_file="$1"
+  local zh_file="$2"
+  local en_headings zh_headings expected_zh
+
+  en_headings="$(awk '/^## / {sub(/^## /, ""); print}' "$en_file")"
+  zh_headings="$(awk '/^## / {sub(/^## /, ""); print}' "$zh_file")"
+  expected_zh="$(printf '%s\n' "$en_headings" | sed \
+    -e 's/^Why$/为什么做这个/' \
+    -e 's/^Requirements$/环境要求/' \
+    -e 's/^Install$/安装/' \
+    -e 's/^Usage$/使用/' \
+    -e 's/^Runtime Files$/运行时文件/' \
+    -e 's/^Tests$/测试/' \
+    -e 's/^Uninstall$/卸载/' \
+    -e 's/^Safety Notes$/安全说明/')"
+
+  [ "$zh_headings" = "$expected_zh" ] || {
+    printf '  README headings differ\n'
+    printf '  expected:\n%s\n' "$expected_zh"
+    printf '  actual:\n%s\n' "$zh_headings"
+    return 1
+  }
+}
+
 run_with_timeout() {
   local seconds="$1"
   shift
@@ -298,6 +323,18 @@ FAKE_PREPARE
   [ "$?" -eq 124 ] && assert_contains "$TEST_DIR/grill.err" "等待 Claude Code grill 结果超时"
 }
 
+test_readme_language_switch_and_structure() {
+  assert_file "$ROOT_DIR/README.md" &&
+    assert_file "$ROOT_DIR/README.zh-CN.md" &&
+    assert_contains "$ROOT_DIR/README.md" "[English](README.md) | [中文](README.zh-CN.md)" &&
+    assert_contains "$ROOT_DIR/README.zh-CN.md" "[English](README.md) | [中文](README.zh-CN.md)" &&
+    assert_headings_match "$ROOT_DIR/README.md" "$ROOT_DIR/README.zh-CN.md" &&
+    assert_contains "$ROOT_DIR/README.md" "tests/run.sh" &&
+    assert_contains "$ROOT_DIR/README.zh-CN.md" "tests/run.sh" &&
+    assert_contains "$ROOT_DIR/README.md" "CLAUDEGRILL_SKIP_LAUNCH_AGENT=1 ./install.sh" &&
+    assert_contains "$ROOT_DIR/README.zh-CN.md" "CLAUDEGRILL_SKIP_LAUNCH_AGENT=1 ./install.sh"
+}
+
 run_test() {
   local name="$1"
   if "$name"; then
@@ -319,6 +356,7 @@ run_test test_claude_grill_accepts_markdown_wrapped_verdict
 run_test test_claude_grill_exits_one_for_revise
 run_test test_claude_grill_exits_two_for_blocked
 run_test test_claude_grill_times_out_when_result_missing
+run_test test_readme_language_switch_and_structure
 
 printf '\n%s passed, %s failed\n' "$PASS_COUNT" "$FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ]

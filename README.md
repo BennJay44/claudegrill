@@ -1,15 +1,17 @@
 # ClaudeGrill
 
+[English](README.md) | [中文](README.zh-CN.md)
+
 ClaudeGrill is a local bridge for Codex and Claude Code.
 
-It adds two Codex skills:
+It installs two Codex skills:
 
-- `claude-review`: ask Claude Code for a one-shot read-only review.
-- `claude-grill`: run a `grill-me-codex` style plan review loop where Codex drafts a plan, Claude Code critiques or approves it, and Codex revises before implementation.
+- `claude-review`: ask Claude Code for a one-shot, read-only review.
+- `claude-grill`: run a `grill-me-codex` style plan review loop. Codex drafts a plan, Claude Code critiques or approves it, and Codex revises before implementation.
 
-It also adds one Claude Code skill:
+It also installs one Claude Code skill:
 
-- `codex-review`: ask Codex for a one-shot read-only review from Claude Code.
+- `codex-review`: ask Codex for a one-shot, read-only review from Claude Code.
 
 ## Why
 
@@ -39,8 +41,8 @@ The installer copies:
 
 - Codex skills to `${CODEX_HOME:-$HOME/.codex}/skills`
 - Claude Code skills to `${CLAUDE_HOME:-$HOME/.claude}/skills`
-- bridge daemon to `${CODEX_HOME:-$HOME/.codex}/agent-bridge`
-- LaunchAgent to `~/Library/LaunchAgents/com.claudegrill.agentbridge.claude-review.plist`
+- the bridge daemon to `${CODEX_HOME:-$HOME/.codex}/agent-bridge`
+- the LaunchAgent to `~/Library/LaunchAgents/com.claudegrill.agentbridge.claude-review.plist`
 
 To test the file copy step without loading the macOS LaunchAgent:
 
@@ -53,13 +55,13 @@ CLAUDEGRILL_SKIP_LAUNCH_AGENT=1 ./install.sh
 In Codex:
 
 ```text
-让 claudecode 审查一下这个方案
+Ask Claude Code to review this plan.
 ```
 
 For multi-round plan approval:
 
 ```text
-像 grill-me-codex 一样，先和 claudecode 互相商讨并审批这个方案
+Use a grill-me-codex style loop: discuss this plan with Claude Code and get approval before implementation.
 ```
 
 The `claude-grill` flow expects Claude Code to return one of:
@@ -73,8 +75,10 @@ VERDICT: BLOCKED
 In Claude Code:
 
 ```text
-让 codex 审查一下这个 diff
+Ask Codex to review this diff.
 ```
+
+GitHub does not switch README languages automatically for this repository. Use the language links at the top of the file to switch manually.
 
 ## Runtime Files
 
@@ -107,6 +111,8 @@ tests/run.sh
 ```
 
 The tests run with temporary `HOME`, `CODEX_HOME`, `CLAUDE_HOME`, and bridge state paths. They do not install into your real Codex or Claude directories.
+
+The test harness also checks that `README.md` and `README.zh-CN.md` keep the same section structure and language-switch links.
 
 ## Uninstall
 
