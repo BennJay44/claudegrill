@@ -1,0 +1,7 @@
+.DS_Store
+.agent-reviews/
+*.log
+*.tmp
+node_modules/
+dist/
+build/
