@@ -8,6 +8,8 @@ LOG_DIR="$STATE_DIR/logs"
 RESULT_DIR="$STATE_DIR/results"
 BATCH_DIR="$STATE_DIR/batches"
 POLL_SECONDS="${POLL_SECONDS:-3}"
+AGENT_BRIDGE_ONCE="${AGENT_BRIDGE_ONCE:-0}"
+LOCK_ATTEMPTS="${AGENT_BRIDGE_LOCK_ATTEMPTS:-50}"
 
 mkdir -p "$LOG_DIR" "$RESULT_DIR" "$BATCH_DIR"
 touch "$QUEUE_FILE"
@@ -17,30 +19,30 @@ log() {
 }
 
 acquire_queue_lock() {
-  if mkdir "$LOCK_DIR" 2>/dev/null; then
-    printf '%s\n' "$$" > "$LOCK_DIR/pid"
-    return 0
-  fi
-
-  if [ -f "$LOCK_DIR/pid" ]; then
-    local lock_pid
-    lock_pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
-    if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
-      rm -f "$LOCK_DIR/pid"
-      rmdir "$LOCK_DIR" 2>/dev/null || true
-      if mkdir "$LOCK_DIR" 2>/dev/null; then
-        printf '%s\n' "$$" > "$LOCK_DIR/pid"
-        return 0
+  local attempts=0
+  while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+    if [ -f "$LOCK_DIR/pid" ]; then
+      local lock_pid
+      lock_pid="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+      if [ -n "$lock_pid" ] && ! kill -0 "$lock_pid" 2>/dev/null; then
+        rm -f "$LOCK_DIR/pid"
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        continue
       fi
+    elif rmdir "$LOCK_DIR" 2>/dev/null; then
+      continue
     fi
-  elif rmdir "$LOCK_DIR" 2>/dev/null; then
-    if mkdir "$LOCK_DIR" 2>/dev/null; then
-      printf '%s\n' "$$" > "$LOCK_DIR/pid"
-      return 0
-    fi
-  fi
 
-  return 1
+    attempts=$((attempts + 1))
+    if [ "$attempts" -ge "$LOCK_ATTEMPTS" ]; then
+      log "queue lock busy: $LOCK_DIR"
+      return 1
+    fi
+    sleep 0.1
+  done
+
+  printf '%s\n' "$$" > "$LOCK_DIR/pid"
+  return 0
 }
 
 release_queue_lock() {
@@ -188,6 +190,12 @@ drain_queue_once() {
 }
 
 log "daemon started"
+if [ "$AGENT_BRIDGE_ONCE" = "1" ]; then
+  drain_queue_once
+  log "daemon stopped after one drain"
+  exit 0
+fi
+
 while true; do
   drain_queue_once
   sleep "$POLL_SECONDS"

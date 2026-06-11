@@ -63,8 +63,12 @@ fi
 
 elapsed=0
 while [ "$elapsed" -lt "$WAIT_SECONDS" ]; do
-  if [ -s "$RESULT_PATH" ] && grep -q '^VERDICT:' "$RESULT_PATH"; then
-    VERDICT="$(grep -m 1 '^VERDICT:' "$RESULT_PATH" | sed 's/^VERDICT:[[:space:]]*//;s/[[:space:]]*$//')"
+  VERDICT_LINE=""
+  if [ -s "$RESULT_PATH" ]; then
+    VERDICT_LINE="$(grep -m 1 -E '^[*[:space:]]*VERDICT:[[:space:]]*(APPROVED|REVISE|BLOCKED)[*[:space:]]*$' "$RESULT_PATH" || true)"
+  fi
+  if [ -n "$VERDICT_LINE" ]; then
+    VERDICT="$(printf '%s\n' "$VERDICT_LINE" | sed 's/^[*[:space:]]*VERDICT:[[:space:]]*//;s/[*[:space:]]*$//')"
     case "$VERDICT" in
       APPROVED) EXIT_CODE=0 ;;
       REVISE) EXIT_CODE=1 ;;
@@ -79,7 +83,7 @@ while [ "$elapsed" -lt "$WAIT_SECONDS" ]; do
     echo "GRILL_RESULT_PATH=$RESULT_PATH"
     echo "GRILL_VERDICT=$VERDICT"
     echo "GRILL_EXIT_CODE=$EXIT_CODE"
-    exit 0
+    exit "$EXIT_CODE"
   fi
   sleep 3
   elapsed=$((elapsed + 3))

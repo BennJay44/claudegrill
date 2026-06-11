@@ -1,0 +1,324 @@
+#!/usr/bin/env bash
+set -u
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TEST_TMP_ROOT="${TMPDIR:-/tmp}/claudegrill-tests-$$"
+PASS_COUNT=0
+FAIL_COUNT=0
+
+cleanup() {
+  rm -rf "$TEST_TMP_ROOT"
+}
+trap cleanup EXIT
+
+fail() {
+  printf 'not ok - %s\n' "$1"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+}
+
+pass() {
+  printf 'ok - %s\n' "$1"
+  PASS_COUNT=$((PASS_COUNT + 1))
+}
+
+assert_file() {
+  [ -f "$1" ] || {
+    printf '  missing file: %s\n' "$1"
+    return 1
+  }
+}
+
+assert_executable() {
+  [ -x "$1" ] || {
+    printf '  not executable: %s\n' "$1"
+    return 1
+  }
+}
+
+assert_contains() {
+  grep -Fq "$2" "$1" || {
+    printf '  missing text in %s: %s\n' "$1" "$2"
+    return 1
+  }
+}
+
+run_with_timeout() {
+  local seconds="$1"
+  shift
+  perl -e 'alarm shift; exec @ARGV' "$seconds" "$@"
+}
+
+with_test_env() {
+  local name="$1"
+  TEST_DIR="$TEST_TMP_ROOT/$name"
+  HOME="$TEST_DIR/home"
+  CODEX_HOME="$TEST_DIR/codex"
+  CLAUDE_HOME="$TEST_DIR/claude"
+  AGENT_BRIDGE_STATE_DIR="$TEST_DIR/state"
+  AGENT_BRIDGE_QUEUE_FILE="$TEST_DIR/queue"
+  AGENT_BRIDGE_LOCK_DIR="$TEST_DIR/lock"
+  PATH="$TEST_DIR/bin:$PATH"
+  mkdir -p "$HOME" "$CODEX_HOME" "$CLAUDE_HOME" "$AGENT_BRIDGE_STATE_DIR" "$TEST_DIR/bin"
+  export HOME CODEX_HOME CLAUDE_HOME AGENT_BRIDGE_STATE_DIR AGENT_BRIDGE_QUEUE_FILE AGENT_BRIDGE_LOCK_DIR PATH TEST_DIR
+}
+
+test_install_and_uninstall_without_launchagent() {
+  with_test_env install
+
+  if ! CLAUDEGRILL_SKIP_LAUNCH_AGENT=1 "$ROOT_DIR/install.sh" > "$TEST_DIR/install.out" 2> "$TEST_DIR/install.err"; then
+    cat "$TEST_DIR/install.err"
+    return 1
+  fi
+
+  assert_file "$CODEX_HOME/skills/claude-review/SKILL.md" &&
+    assert_file "$CODEX_HOME/skills/claude-grill/SKILL.md" &&
+    assert_file "$CLAUDE_HOME/skills/codex-review/SKILL.md" &&
+    assert_executable "$CODEX_HOME/skills/claude-review/scripts/prepare_claude_review.sh" &&
+    assert_executable "$CODEX_HOME/skills/claude-grill/scripts/claude_grill_round.sh" &&
+    assert_executable "$CLAUDE_HOME/skills/codex-review/scripts/codex_review.sh" &&
+    assert_executable "$CODEX_HOME/agent-bridge/agent_bridge_claude_daemon.sh" || return 1
+
+  "$ROOT_DIR/uninstall.sh" > "$TEST_DIR/uninstall.out" 2> "$TEST_DIR/uninstall.err" || {
+    cat "$TEST_DIR/uninstall.err"
+    return 1
+  }
+
+  [ ! -e "$CODEX_HOME/skills/claude-grill" ] &&
+    [ ! -e "$CODEX_HOME/skills/claude-review" ] &&
+    [ ! -e "$CLAUDE_HOME/skills/codex-review" ]
+}
+
+test_prepare_review_creates_queue_bundle_and_pointer() {
+  with_test_env prepare
+  local work_dir="$TEST_DIR/project"
+  mkdir -p "$work_dir"
+
+  (
+    cd "$work_dir" &&
+      "$ROOT_DIR/skills/codex/claude-review/scripts/prepare_claude_review.sh" "检查安装流程" "$ROOT_DIR/README.md"
+  ) > "$TEST_DIR/prepare.out" 2> "$TEST_DIR/prepare.err" || {
+    cat "$TEST_DIR/prepare.err"
+    return 1
+  }
+
+  local request_path result_path
+  request_path="$(awk -F= '/^REQUEST_PATH=/ {print $2}' "$TEST_DIR/prepare.out")"
+  result_path="$(awk -F= '/^RESULT_PATH=/ {print $2}' "$TEST_DIR/prepare.out")"
+
+  assert_file "$request_path" &&
+    assert_file "$work_dir/.agent-reviews/$(basename "$request_path")" &&
+    assert_contains "$request_path" "检查安装流程" &&
+    assert_contains "$request_path" "$ROOT_DIR/README.md" &&
+    assert_contains "$AGENT_BRIDGE_QUEUE_FILE" "$request_path" &&
+    [ "$result_path" != "$AGENT_BRIDGE_STATE_DIR/results/${request_path##*/}" ] || return 1
+
+  [ -n "$result_path" ] && [ "${result_path%/*}" = "$AGENT_BRIDGE_STATE_DIR/results" ]
+}
+
+test_install_replaces_existing_skill_dirs() {
+  with_test_env reinstall
+  mkdir -p "$CODEX_HOME/skills/claude-grill" "$CODEX_HOME/skills/claude-review" "$CLAUDE_HOME/skills/codex-review"
+  touch "$CODEX_HOME/skills/claude-grill/stale-file"
+  touch "$CODEX_HOME/skills/claude-review/stale-file"
+  touch "$CLAUDE_HOME/skills/codex-review/stale-file"
+
+  CLAUDEGRILL_SKIP_LAUNCH_AGENT=1 "$ROOT_DIR/install.sh" > "$TEST_DIR/install.out" 2> "$TEST_DIR/install.err" || {
+    cat "$TEST_DIR/install.err"
+    return 1
+  }
+
+  [ ! -e "$CODEX_HOME/skills/claude-grill/stale-file" ] &&
+    [ ! -e "$CODEX_HOME/skills/claude-review/stale-file" ] &&
+    [ ! -e "$CLAUDE_HOME/skills/codex-review/stale-file" ]
+}
+
+test_daemon_one_shot_processes_queued_request() {
+  with_test_env daemon
+  local request_path="$AGENT_BRIDGE_STATE_DIR/requests/claude-review-request-test.md"
+  local result_path="$AGENT_BRIDGE_STATE_DIR/results/claude-review-test.md"
+  mkdir -p "$(dirname "$request_path")"
+
+  cat > "$TEST_DIR/bin/claude" <<'FAKE_CLAUDE'
+#!/usr/bin/env bash
+printf 'VERDICT: APPROVED\n\nfake review ok\n'
+FAKE_CLAUDE
+  chmod +x "$TEST_DIR/bin/claude"
+
+  {
+    printf '# Review request\n\n'
+    printf -- '- 项目目录：%s\n' "$TEST_DIR/project"
+    printf -- '- 结果路径：%s\n' "$result_path"
+  } > "$request_path"
+  printf '%s\n' "$request_path" > "$AGENT_BRIDGE_QUEUE_FILE"
+
+  if ! AGENT_BRIDGE_ONCE=1 POLL_SECONDS=0 run_with_timeout 5 "$ROOT_DIR/bin/agent_bridge_claude_daemon.sh" > "$TEST_DIR/daemon.out" 2> "$TEST_DIR/daemon.err"; then
+    cat "$TEST_DIR/daemon.err"
+    return 1
+  fi
+
+  assert_file "$result_path" &&
+    assert_contains "$result_path" "VERDICT: APPROVED" &&
+    assert_file "$request_path.done"
+}
+
+test_daemon_one_shot_waits_for_live_lock() {
+  with_test_env daemon-lock
+  local request_path="$AGENT_BRIDGE_STATE_DIR/requests/claude-review-request-test.md"
+  local result_path="$AGENT_BRIDGE_STATE_DIR/results/claude-review-test.md"
+  mkdir -p "$(dirname "$request_path")" "$AGENT_BRIDGE_LOCK_DIR"
+
+  cat > "$TEST_DIR/bin/claude" <<'FAKE_CLAUDE'
+#!/usr/bin/env bash
+printf 'VERDICT: APPROVED\n\nfake review ok\n'
+FAKE_CLAUDE
+  chmod +x "$TEST_DIR/bin/claude"
+
+  printf '%s\n' "$$" > "$AGENT_BRIDGE_LOCK_DIR/pid"
+  (
+    sleep 1
+    rm -f "$AGENT_BRIDGE_LOCK_DIR/pid"
+    rmdir "$AGENT_BRIDGE_LOCK_DIR" 2>/dev/null || true
+  ) &
+
+  {
+    printf '# Review request\n\n'
+    printf -- '- 项目目录：%s\n' "$TEST_DIR/project"
+    printf -- '- 结果路径：%s\n' "$result_path"
+  } > "$request_path"
+  printf '%s\n' "$request_path" > "$AGENT_BRIDGE_QUEUE_FILE"
+
+  if ! AGENT_BRIDGE_ONCE=1 POLL_SECONDS=0 run_with_timeout 5 "$ROOT_DIR/bin/agent_bridge_claude_daemon.sh" > "$TEST_DIR/daemon.out" 2> "$TEST_DIR/daemon.err"; then
+    cat "$TEST_DIR/daemon.err"
+    return 1
+  fi
+
+  assert_file "$result_path" &&
+    assert_contains "$result_path" "VERDICT: APPROVED"
+}
+
+test_claude_grill_parses_approved_result() {
+  with_test_env grill
+  local prepare_dir="$CODEX_HOME/skills/claude-review/scripts"
+  local result_path="$TEST_DIR/grill-result.md"
+  mkdir -p "$prepare_dir"
+
+  cat > "$prepare_dir/prepare_claude_review.sh" <<FAKE_PREPARE
+#!/usr/bin/env bash
+printf 'VERDICT: APPROVED\n\nfake grill ok\n' > "$result_path"
+printf 'RESULT_PATH=%s\n' "$result_path"
+FAKE_PREPARE
+  chmod +x "$prepare_dir/prepare_claude_review.sh"
+
+  CLAUDE_GRILL_WAIT_SECONDS=2 "$ROOT_DIR/skills/codex/claude-grill/scripts/claude_grill_round.sh" "检查方案" > "$TEST_DIR/grill.out" 2> "$TEST_DIR/grill.err" || {
+    cat "$TEST_DIR/grill.err"
+    return 1
+  }
+
+  assert_contains "$TEST_DIR/grill.out" "GRILL_VERDICT=APPROVED" &&
+    assert_contains "$TEST_DIR/grill.out" "GRILL_EXIT_CODE=0"
+}
+
+test_claude_grill_accepts_markdown_wrapped_verdict() {
+  with_test_env grill-markdown
+  local prepare_dir="$CODEX_HOME/skills/claude-review/scripts"
+  local result_path="$TEST_DIR/grill-result.md"
+  mkdir -p "$prepare_dir"
+
+  cat > "$prepare_dir/prepare_claude_review.sh" <<FAKE_PREPARE
+#!/usr/bin/env bash
+printf '**VERDICT: APPROVED**\n\nfake grill ok\n' > "$result_path"
+printf 'RESULT_PATH=%s\n' "$result_path"
+FAKE_PREPARE
+  chmod +x "$prepare_dir/prepare_claude_review.sh"
+
+  CLAUDE_GRILL_WAIT_SECONDS=1 "$ROOT_DIR/skills/codex/claude-grill/scripts/claude_grill_round.sh" "检查方案" > "$TEST_DIR/grill.out" 2> "$TEST_DIR/grill.err" || {
+    cat "$TEST_DIR/grill.err"
+    return 1
+  }
+
+  assert_contains "$TEST_DIR/grill.out" "GRILL_VERDICT=APPROVED" &&
+    assert_contains "$TEST_DIR/grill.out" "GRILL_EXIT_CODE=0"
+}
+
+test_claude_grill_exits_one_for_revise() {
+  with_test_env grill-revise
+  local prepare_dir="$CODEX_HOME/skills/claude-review/scripts"
+  local result_path="$TEST_DIR/grill-result.md"
+  mkdir -p "$prepare_dir"
+
+  cat > "$prepare_dir/prepare_claude_review.sh" <<FAKE_PREPARE
+#!/usr/bin/env bash
+printf 'VERDICT: REVISE\n\nneeds changes\n' > "$result_path"
+printf 'RESULT_PATH=%s\n' "$result_path"
+FAKE_PREPARE
+  chmod +x "$prepare_dir/prepare_claude_review.sh"
+
+  CLAUDE_GRILL_WAIT_SECONDS=2 "$ROOT_DIR/skills/codex/claude-grill/scripts/claude_grill_round.sh" "检查方案" > "$TEST_DIR/grill.out" 2> "$TEST_DIR/grill.err"
+  local status=$?
+
+  [ "$status" -eq 1 ] &&
+    assert_contains "$TEST_DIR/grill.out" "GRILL_VERDICT=REVISE" &&
+    assert_contains "$TEST_DIR/grill.out" "GRILL_EXIT_CODE=1"
+}
+
+test_claude_grill_exits_two_for_blocked() {
+  with_test_env grill-blocked
+  local prepare_dir="$CODEX_HOME/skills/claude-review/scripts"
+  local result_path="$TEST_DIR/grill-result.md"
+  mkdir -p "$prepare_dir"
+
+  cat > "$prepare_dir/prepare_claude_review.sh" <<FAKE_PREPARE
+#!/usr/bin/env bash
+printf 'VERDICT: BLOCKED\n\nmissing information\n' > "$result_path"
+printf 'RESULT_PATH=%s\n' "$result_path"
+FAKE_PREPARE
+  chmod +x "$prepare_dir/prepare_claude_review.sh"
+
+  CLAUDE_GRILL_WAIT_SECONDS=2 "$ROOT_DIR/skills/codex/claude-grill/scripts/claude_grill_round.sh" "检查方案" > "$TEST_DIR/grill.out" 2> "$TEST_DIR/grill.err"
+  local status=$?
+
+  [ "$status" -eq 2 ] &&
+    assert_contains "$TEST_DIR/grill.out" "GRILL_VERDICT=BLOCKED" &&
+    assert_contains "$TEST_DIR/grill.out" "GRILL_EXIT_CODE=2"
+}
+
+test_claude_grill_times_out_when_result_missing() {
+  with_test_env grill-timeout
+  local prepare_dir="$CODEX_HOME/skills/claude-review/scripts"
+  local result_path="$TEST_DIR/missing-result.md"
+  mkdir -p "$prepare_dir"
+
+  cat > "$prepare_dir/prepare_claude_review.sh" <<FAKE_PREPARE
+#!/usr/bin/env bash
+printf 'RESULT_PATH=%s\n' "$result_path"
+FAKE_PREPARE
+  chmod +x "$prepare_dir/prepare_claude_review.sh"
+
+  CLAUDE_GRILL_WAIT_SECONDS=1 "$ROOT_DIR/skills/codex/claude-grill/scripts/claude_grill_round.sh" "检查方案" > "$TEST_DIR/grill.out" 2> "$TEST_DIR/grill.err"
+  [ "$?" -eq 124 ] && assert_contains "$TEST_DIR/grill.err" "等待 Claude Code grill 结果超时"
+}
+
+run_test() {
+  local name="$1"
+  if "$name"; then
+    pass "$name"
+  else
+    fail "$name"
+  fi
+}
+
+mkdir -p "$TEST_TMP_ROOT"
+
+run_test test_install_and_uninstall_without_launchagent
+run_test test_install_replaces_existing_skill_dirs
+run_test test_prepare_review_creates_queue_bundle_and_pointer
+run_test test_daemon_one_shot_processes_queued_request
+run_test test_daemon_one_shot_waits_for_live_lock
+run_test test_claude_grill_parses_approved_result
+run_test test_claude_grill_accepts_markdown_wrapped_verdict
+run_test test_claude_grill_exits_one_for_revise
+run_test test_claude_grill_exits_two_for_blocked
+run_test test_claude_grill_times_out_when_result_missing
+
+printf '\n%s passed, %s failed\n' "$PASS_COUNT" "$FAIL_COUNT"
+[ "$FAIL_COUNT" -eq 0 ]

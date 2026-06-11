@@ -28,6 +28,11 @@ mkdir -p \
   "$LAUNCH_AGENT_DIR" \
   "$STATE_DIR"
 
+rm -rf \
+  "$CODEX_HOME/skills/claude-review" \
+  "$CODEX_HOME/skills/claude-grill" \
+  "$CLAUDE_HOME/skills/codex-review"
+
 cp -R "$ROOT_DIR/skills/codex/claude-review" "$CODEX_HOME/skills/"
 cp -R "$ROOT_DIR/skills/codex/claude-grill" "$CODEX_HOME/skills/"
 cp -R "$ROOT_DIR/skills/claude/codex-review" "$CLAUDE_HOME/skills/"
@@ -40,7 +45,9 @@ chmod +x \
   "$CLAUDE_HOME/skills/codex-review/scripts/codex_review.sh" \
   "$AGENT_HOME/agent_bridge_claude_daemon.sh"
 
-if [ "$(uname -s)" = "Darwin" ]; then
+if [ "${CLAUDEGRILL_SKIP_LAUNCH_AGENT:-0}" = "1" ]; then
+  echo "Skipping LaunchAgent setup because CLAUDEGRILL_SKIP_LAUNCH_AGENT=1." >&2
+elif [ "$(uname -s)" = "Darwin" ]; then
   sed \
     -e "s#__DAEMON_PATH__#$AGENT_HOME/agent_bridge_claude_daemon.sh#g" \
     -e "s#__LOG_DIR__#$AGENT_HOME/logs#g" \

@@ -1,0 +1,16 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  shell-tests:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse shell scripts
+        run: |
+          find . -name '*.sh' -print0 | xargs -0 bash -n
+      - name: Run tests
+        run: tests/run.sh

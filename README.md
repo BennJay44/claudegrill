@@ -42,6 +42,12 @@ The installer copies:
 - bridge daemon to `${CODEX_HOME:-$HOME/.codex}/agent-bridge`
 - LaunchAgent to `~/Library/LaunchAgents/com.claudegrill.agentbridge.claude-review.plist`
 
+To test the file copy step without loading the macOS LaunchAgent:
+
+```bash
+CLAUDEGRILL_SKIP_LAUNCH_AGENT=1 ./install.sh
+```
+
 ## Usage
 
 In Codex:
@@ -85,6 +91,22 @@ export AGENT_BRIDGE_STATE_DIR=/path/to/state
 export AGENT_BRIDGE_QUEUE_FILE=/path/to/queue
 export AGENT_BRIDGE_LOCK_DIR=/path/to/lock
 ```
+
+For local debugging, process the queue once and exit:
+
+```bash
+AGENT_BRIDGE_ONCE=1 ./bin/agent_bridge_claude_daemon.sh
+```
+
+## Tests
+
+ClaudeGrill uses a small Bash test harness, so it does not need a separate test framework:
+
+```bash
+tests/run.sh
+```
+
+The tests run with temporary `HOME`, `CODEX_HOME`, `CLAUDE_HOME`, and bridge state paths. They do not install into your real Codex or Claude directories.
 
 ## Uninstall
 
