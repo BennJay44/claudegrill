@@ -335,6 +335,15 @@ test_readme_language_switch_and_structure() {
     assert_contains "$ROOT_DIR/README.zh-CN.md" "CLAUDEGRILL_SKIP_LAUNCH_AGENT=1 ./install.sh"
 }
 
+test_tracked_files_do_not_reference_legacy_project_name() {
+  local pattern
+  pattern='grill[-_ ]?m''e[-_ ]?codex|grillm''ecodex'
+
+  if git -C "$ROOT_DIR" grep -n -Ei "$pattern" -- .; then
+    return 1
+  fi
+}
+
 run_test() {
   local name="$1"
   if "$name"; then
@@ -357,6 +366,7 @@ run_test test_claude_grill_exits_one_for_revise
 run_test test_claude_grill_exits_two_for_blocked
 run_test test_claude_grill_times_out_when_result_missing
 run_test test_readme_language_switch_and_structure
+run_test test_tracked_files_do_not_reference_legacy_project_name
 
 printf '\n%s passed, %s failed\n' "$PASS_COUNT" "$FAIL_COUNT"
 [ "$FAIL_COUNT" -eq 0 ]

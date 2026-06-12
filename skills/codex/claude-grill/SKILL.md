@@ -1,6 +1,6 @@
 ---
 name: claude-grill
-description: Use when the user asks Codex to discuss, debate, approve, grill, or optimize a plan/project with Claude Code before implementation. Trigger phrases include "像 grill-me-codex", "和 claudecode 互相商讨", "让 claudecode 审批方案", "优化方案后再做", and similar requests.
+description: Use when the user asks Codex to discuss, debate, approve, grill, or optimize a plan/project with Claude Code before implementation. Trigger phrases include "和 claudecode 互相商讨", "让 claudecode 审批方案", "优化方案后再做", "多轮审查方案", and similar requests.
 argument-hint: "[goal or plan focus]"
 ---
 

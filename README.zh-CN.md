@@ -7,7 +7,7 @@ ClaudeGrill 是一个本地桥接工具，用来把 Codex 和 Claude Code 的审
 它会安装两个 Codex skill：
 
 - `claude-review`：让 Claude Code 做一次只读审查。
-- `claude-grill`：运行类似 `grill-me-codex` 的多轮方案审查。Codex 先写方案，Claude Code 负责挑问题或批准，Codex 再根据反馈修改并执行。
+- `claude-grill`：运行多轮方案审查。Codex 先写方案，Claude Code 负责挑问题或批准，Codex 再根据反馈修改并执行。
 
 它也会安装一个 Claude Code skill：
 
@@ -61,7 +61,7 @@ CLAUDEGRILL_SKIP_LAUNCH_AGENT=1 ./install.sh
 多轮方案审批：
 
 ```text
-像 grill-me-codex 一样，先和 claudecode 互相商讨并审批这个方案
+先和 claudecode 多轮商讨并审批这个方案，再开始实现
 ```
 
 `claude-grill` 流程要求 Claude Code 返回下面三种结果之一：

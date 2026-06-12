@@ -7,7 +7,7 @@ ClaudeGrill is a local bridge for Codex and Claude Code.
 It installs two Codex skills:
 
 - `claude-review`: ask Claude Code for a one-shot, read-only review.
-- `claude-grill`: run a `grill-me-codex` style plan review loop. Codex drafts a plan, Claude Code critiques or approves it, and Codex revises before implementation.
+- `claude-grill`: run a multi-round plan review loop. Codex drafts a plan, Claude Code critiques or approves it, and Codex revises before implementation.
 
 It also installs one Claude Code skill:
 
@@ -61,7 +61,7 @@ Ask Claude Code to review this plan.
 For multi-round plan approval:
 
 ```text
-Use a grill-me-codex style loop: discuss this plan with Claude Code and get approval before implementation.
+Discuss this plan with Claude Code in a multi-round review loop, then get approval before implementation.
 ```
 
 The `claude-grill` flow expects Claude Code to return one of:

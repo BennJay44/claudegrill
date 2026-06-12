@@ -10,7 +10,7 @@ When this skill is invoked from Codex, do not directly call Claude Code with pro
 
 Instead, use the local background bridge. Codex creates a local request bundle, the macOS background bridge calls Claude Code, and Claude's result is written back automatically.
 
-If the user asks for multi-round discussion, plan approval, or a `grill-me-codex` style workflow, use the `claude-grill` skill instead of this one.
+If the user asks for multi-round discussion or plan approval, use the `claude-grill` skill instead of this one.
 
 ## What to send
 
