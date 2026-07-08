@@ -10,6 +10,7 @@ BATCH_DIR="$STATE_DIR/batches"
 POLL_SECONDS="${POLL_SECONDS:-3}"
 AGENT_BRIDGE_ONCE="${AGENT_BRIDGE_ONCE:-0}"
 LOCK_ATTEMPTS="${AGENT_BRIDGE_LOCK_ATTEMPTS:-50}"
+CLAUDE_TIMEOUT_SECONDS="${CLAUDEGRILL_CLAUDE_TIMEOUT_SECONDS:-300}"
 
 mkdir -p "$LOG_DIR" "$RESULT_DIR" "$BATCH_DIR"
 touch "$QUEUE_FILE"
@@ -134,14 +135,42 @@ process_request() {
 
 $prompt_text"
 
+  local status
+  set +e
   (
     cd "${TMPDIR:-/tmp}"
-    "$claude_bin" -p \
+    perl -e 'alarm shift; exec @ARGV' "$CLAUDE_TIMEOUT_SECONDS" "$claude_bin" -p \
       --permission-mode plan \
       --tools "" \
       --output-format text \
       "$prompt_text"
   ) > "$result_file" 2> "$run_log"
+  status=$?
+  set -e
+
+  if [ "$status" -ne 0 ]; then
+    if [ ! -s "$result_file" ]; then
+      {
+        echo "Claude Code 审查桥执行失败。"
+        echo
+        echo "- 请求文件：$request_file"
+        echo "- 结果路径：$result_file"
+        echo "- 退出码：$status"
+        echo "- timeout seconds：$CLAUDE_TIMEOUT_SECONDS"
+        echo
+        echo "## stderr"
+        echo
+        if [ -s "$run_log" ]; then
+          cat "$run_log"
+        else
+          echo "无 stderr 输出。"
+        fi
+      } > "$result_file"
+    fi
+    touch "$done_file"
+    log "failed: $result_file"
+    return 1
+  fi
 
   touch "$done_file"
   log "done: $result_file"

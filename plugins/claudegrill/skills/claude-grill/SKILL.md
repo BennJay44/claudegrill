@@ -2,6 +2,8 @@
 name: claude-grill
 description: Use when the user asks Codex to discuss, debate, approve, grill, or optimize a plan/project with Claude Code before implementation. Trigger phrases include "和 claudecode 互相商讨", "让 claudecode 审批方案", "优化方案后再做", "多轮审查方案", and similar requests.
 argument-hint: "[goal or plan focus]"
+created: 2026-06-11T18:14
+updated: 2026-07-08T18:00
 ---
 
 # Claude Code Plan Grill
@@ -31,10 +33,23 @@ Claude Code is a read-only external reviewer. Codex remains the owner of the wor
 Run one round with:
 
 ```bash
-"${CODEX_HOME:-$HOME/.codex}/skills/claude-grill/scripts/claude_grill_round.sh" "<plan or review brief>" [relevant-file ...]
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" grill --wait "<plan or review brief>" -- [relevant-file ...]
 ```
 
 Pass only relevant files. Do not pass broad directories.
+
+For a background round, use:
+
+```bash
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" grill --background "<plan or review brief>" -- [relevant-file ...]
+```
+
+Then inspect it with:
+
+```bash
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" status <job-id>
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" result <job-id>
+```
 
 ## Required Claude Verdict Format
 

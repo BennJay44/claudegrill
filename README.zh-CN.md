@@ -1,6 +1,6 @@
 ---
 created: 2026-06-11T20:18
-updated: 2026-07-08T17:39
+updated: 2026-07-08T18:01
 ---
 # ClaudeGrill
 
@@ -65,10 +65,27 @@ CLAUDEGRILL_SKIP_LAUNCH_AGENT=1 ./install.sh
 让 claudecode 审查一下这个方案
 ```
 
+命令式用法：
+
+```bash
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" setup
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" review --background "审查当前实现" -- README.md install.sh
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" adversarial-review --background "挑战插件架构设计" -- plugins/claudegrill/.codex-plugin/plugin.json
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" status
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" result <job-id>
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" cancel <job-id>
+```
+
 多轮方案审批：
 
 ```text
 先和 claudecode 多轮商讨并审批这个方案，再开始实现
+```
+
+对应命令是：
+
+```bash
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" grill --wait "实现前审批这个方案" -- plugins/claudegrill/.codex-plugin/plugin.json
 ```
 
 `claude-grill` 流程要求 Claude Code 返回下面三种结果之一：

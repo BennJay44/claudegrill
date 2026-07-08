@@ -1,6 +1,6 @@
 ---
 created: 2026-06-11T20:18
-updated: 2026-07-08T17:39
+updated: 2026-07-08T18:01
 ---
 # ClaudeGrill
 
@@ -65,10 +65,27 @@ In Codex:
 Ask Claude Code to review this plan.
 ```
 
+Command-style usage:
+
+```bash
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" setup
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" review --background "review the current implementation" -- README.md install.sh
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" adversarial-review --background "challenge the plugin architecture" -- plugins/claudegrill/.codex-plugin/plugin.json
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" status
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" result <job-id>
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" cancel <job-id>
+```
+
 For multi-round plan approval:
 
 ```text
 Discuss this plan with Claude Code in a multi-round review loop, then get approval before implementation.
+```
+
+The equivalent command is:
+
+```bash
+"${CODEX_HOME:-$HOME/.codex}/agent-bridge/claudegrill" grill --wait "approve this plan before implementation" -- plugins/claudegrill/.codex-plugin/plugin.json
 ```
 
 The `claude-grill` flow expects Claude Code to return one of:

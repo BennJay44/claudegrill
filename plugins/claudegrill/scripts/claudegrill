@@ -1,0 +1,387 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+STATE_DIR="${AGENT_BRIDGE_STATE_DIR:-/tmp/claudegrill}"
+QUEUE_FILE="${AGENT_BRIDGE_QUEUE_FILE:-/tmp/claudegrill-claude-review.queue}"
+LOCK_DIR="${AGENT_BRIDGE_LOCK_DIR:-/tmp/claudegrill-claude-review.lock}"
+JOBS_DIR="$STATE_DIR/jobs"
+WAIT_SECONDS="${CLAUDEGRILL_WAIT_SECONDS:-240}"
+POLL_SECONDS="${CLAUDEGRILL_POLL_SECONDS:-3}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+PLUGIN_ROOT="${CLAUDEGRILL_PLUGIN_ROOT:-$CODEX_HOME/plugins/claudegrill}"
+if [ ! -d "$PLUGIN_ROOT/skills" ]; then
+  PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
+PREPARE_SCRIPT="$PLUGIN_ROOT/skills/claude-review/scripts/prepare_claude_review.sh"
+
+mkdir -p "$STATE_DIR" "$JOBS_DIR"
+
+usage() {
+  cat <<'USAGE'
+ClaudeGrill command runtime
+
+Usage:
+  claudegrill setup
+  claudegrill review [--wait|--background] [focus] [-- file ...]
+  claudegrill adversarial-review [--wait|--background] [focus] [-- file ...]
+  claudegrill grill [--wait|--background] [brief] [-- file ...]
+  claudegrill status [job-id] [--all]
+  claudegrill result [job-id]
+  claudegrill cancel [job-id]
+USAGE
+}
+
+now_stamp() {
+  date '+%Y%m%d-%H%M%S'
+}
+
+now_iso() {
+  date '+%Y-%m-%dT%H:%M:%S%z'
+}
+
+job_file() {
+  printf '%s/jobs/%s.env\n' "$STATE_DIR" "$1"
+}
+
+job_value() {
+  local file="$1"
+  local key="$2"
+  awk -F= -v key="$key" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$file"
+}
+
+job_status() {
+  local file="$1"
+  local request_path result_path
+  request_path="$(job_value "$file" REQUEST_PATH)"
+  result_path="$(job_value "$file" RESULT_PATH)"
+
+  if [ -f "$file.cancelled" ]; then
+    printf 'cancelled\n'
+  elif [ -s "$result_path" ]; then
+    if grep -Eq 'API Error:|Claude Code 审查桥执行失败' "$result_path"; then
+      printf 'failed\n'
+    else
+      printf 'completed\n'
+    fi
+  elif [ -e "$request_path.done" ]; then
+    printf 'failed\n'
+  else
+    printf 'pending\n'
+  fi
+}
+
+write_job() {
+  local id="$1"
+  local kind="$2"
+  local request_path="$3"
+  local result_path="$4"
+  local focus="$5"
+  local file
+  file="$(job_file "$id")"
+  {
+    printf 'JOB_ID=%s\n' "$id"
+    printf 'KIND=%s\n' "$kind"
+    printf 'CREATED_AT=%s\n' "$(now_iso)"
+    printf 'PROJECT_DIR=%s\n' "$(pwd)"
+    printf 'REQUEST_PATH=%s\n' "$request_path"
+    printf 'RESULT_PATH=%s\n' "$result_path"
+    printf 'FOCUS=%s\n' "$focus"
+  } > "$file"
+}
+
+parse_mode_focus_and_files() {
+  MODE="background"
+  FOCUS_ARGS=()
+  FILE_ARGS=()
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --wait)
+        MODE="wait"
+        shift
+        ;;
+      --background)
+        MODE="background"
+        shift
+        ;;
+      --)
+        shift
+        FILE_ARGS=("$@")
+        break
+        ;;
+      *)
+        FOCUS_ARGS+=("$1")
+        shift
+        ;;
+    esac
+  done
+}
+
+join_focus() {
+  if [ "${#FOCUS_ARGS[@]}" -eq 0 ]; then
+    printf '%s\n' "$1"
+  else
+    printf '%s\n' "${FOCUS_ARGS[*]}"
+  fi
+}
+
+build_prompt() {
+  local kind="$1"
+  local focus="$2"
+  case "$kind" in
+    review)
+      printf '请让 Claude Code 做一次普通只读审查。重点：%s\n' "$focus"
+      ;;
+    adversarial-review)
+      printf '请让 Claude Code 做一次对抗式审查，重点质疑实现方向、设计取舍、隐藏假设、回滚风险、安全边界和测试缺口。用户关注点：%s\n' "$focus"
+      ;;
+    grill)
+      cat <<EOF
+这是 Codex ↔ Claude Code 的方案商讨/审批回合。请你作为 Claude Code 只读审查员，严格审查 Codex 的方案，并帮助优化。
+
+请只基于本请求中附带的内容分析，不要调用工具，不要输出 <tool_call>。
+
+你必须在最终答案第一行写且只写以下三种 verdict 之一：
+
+VERDICT: APPROVED
+VERDICT: REVISE
+VERDICT: BLOCKED
+
+Codex 当前方案/请求如下：
+
+$focus
+EOF
+      ;;
+    *)
+      printf '%s\n' "$focus"
+      ;;
+  esac
+}
+
+create_review_job() {
+  local kind="$1"
+  local focus="$2"
+  local prompt="$3"
+  local run_output request_path result_path id
+  run_output="$(mktemp "${TMPDIR:-/tmp}/claudegrill-command.XXXXXX")"
+
+  "$PREPARE_SCRIPT" "$prompt" "${FILE_ARGS[@]}" > "$run_output"
+  request_path="$(awk -F= '/^REQUEST_PATH=/ {print substr($0, index($0, "=") + 1)}' "$run_output" | tail -1 | sed 's/^ *//;s/ *$//')"
+  result_path="$(awk -F= '/^RESULT_PATH=/ {print substr($0, index($0, "=") + 1)}' "$run_output" | tail -1 | sed 's/^ *//;s/ *$//')"
+  rm -f "$run_output"
+
+  if [ -z "$request_path" ] || [ -z "$result_path" ]; then
+    echo "无法创建 ClaudeGrill job：prepare 脚本没有返回路径。" >&2
+    return 1
+  fi
+
+  id="cg-$(now_stamp)-$$"
+  CREATED_JOB_ID="$id"
+  write_job "$id" "$kind" "$request_path" "$result_path" "$focus"
+
+  printf 'JOB_ID=%s\n' "$id"
+  printf 'KIND=%s\n' "$kind"
+  printf 'STATUS=pending\n'
+  printf 'REQUEST_PATH=%s\n' "$request_path"
+  printf 'RESULT_PATH=%s\n' "$result_path"
+  printf 'Run `claudegrill status %s` to check progress.\n' "$id"
+}
+
+wait_for_job() {
+  local id="$1"
+  local kind="$2"
+  local file result_path elapsed status verdict_line verdict exit_code
+  file="$(job_file "$id")"
+  result_path="$(job_value "$file" RESULT_PATH)"
+  elapsed=0
+
+  while [ "$elapsed" -lt "$WAIT_SECONDS" ]; do
+    status="$(job_status "$file")"
+    if [ "$status" = "cancelled" ]; then
+      echo "Job cancelled: $id" >&2
+      return 130
+    fi
+    if [ -s "$result_path" ]; then
+      cat "$result_path"
+      if [ "$kind" = "grill" ]; then
+        verdict_line="$(grep -m 1 -E '^[*[:space:]]*VERDICT:[[:space:]]*(APPROVED|REVISE|BLOCKED)[*[:space:]]*$' "$result_path" || true)"
+        verdict="$(printf '%s\n' "$verdict_line" | sed 's/^[*[:space:]]*VERDICT:[[:space:]]*//;s/[*[:space:]]*$//')"
+        case "$verdict" in
+          APPROVED) exit_code=0 ;;
+          REVISE) exit_code=1 ;;
+          BLOCKED) exit_code=2 ;;
+          *) exit_code=3 ;;
+        esac
+        return "$exit_code"
+      fi
+      return 0
+    fi
+    sleep "$POLL_SECONDS"
+    elapsed=$((elapsed + POLL_SECONDS))
+  done
+
+  echo "等待 ClaudeGrill job 超时：$id" >&2
+  return 124
+}
+
+run_review_command() {
+  local kind="$1"
+  local default_focus="$2"
+  shift 2
+  parse_mode_focus_and_files "$@"
+
+  if [ ! -x "$PREPARE_SCRIPT" ]; then
+    echo "未找到 ClaudeGrill prepare 脚本：$PREPARE_SCRIPT" >&2
+    return 1
+  fi
+
+  local focus prompt id
+  focus="$(join_focus "$default_focus")"
+  prompt="$(build_prompt "$kind" "$focus")"
+  create_review_job "$kind" "$focus" "$prompt"
+  id="$CREATED_JOB_ID"
+
+  if [ "$MODE" = "wait" ]; then
+    echo
+    wait_for_job "$id" "$kind"
+  fi
+}
+
+cmd_setup() {
+  local failed=0
+  echo "ClaudeGrill setup"
+  if command -v claude >/dev/null 2>&1 || [ -x "$HOME/.local/bin/claude" ]; then
+    echo "claude CLI: ok"
+  else
+    echo "claude CLI: missing"
+    failed=1
+  fi
+  if [ -x "$PREPARE_SCRIPT" ]; then
+    echo "Review bridge: ok"
+  else
+    echo "Review bridge: missing ($PREPARE_SCRIPT)"
+    failed=1
+  fi
+  if [ -f "$PLUGIN_ROOT/.codex-plugin/plugin.json" ]; then
+    echo "Codex plugin: $PLUGIN_ROOT"
+  else
+    echo "Codex plugin: missing ($PLUGIN_ROOT)"
+    failed=1
+  fi
+  echo "Bridge state: $STATE_DIR"
+  echo "Bridge queue: $QUEUE_FILE"
+  return "$failed"
+}
+
+cmd_status() {
+  local reference="${1:-}"
+  local file id kind created status result_path
+
+  if [ -n "$reference" ] && [ "$reference" != "--all" ]; then
+    file="$(job_file "$reference")"
+    [ -f "$file" ] || {
+      echo "No ClaudeGrill job found for: $reference" >&2
+      return 1
+    }
+    id="$(job_value "$file" JOB_ID)"
+    kind="$(job_value "$file" KIND)"
+    created="$(job_value "$file" CREATED_AT)"
+    result_path="$(job_value "$file" RESULT_PATH)"
+    status="$(job_status "$file")"
+    printf '%s\t%s\t%s\t%s\t%s\n' "job-id" "kind" "status" "created" "result"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$kind" "$status" "$created" "$result_path"
+    return 0
+  fi
+
+  printf '%s\t%s\t%s\t%s\n' "job-id" "kind" "status" "created"
+  for file in $(ls -t "$JOBS_DIR"/cg-*.env 2>/dev/null | head -20); do
+    id="$(job_value "$file" JOB_ID)"
+    kind="$(job_value "$file" KIND)"
+    created="$(job_value "$file" CREATED_AT)"
+    status="$(job_status "$file")"
+    printf '%s\t%s\t%s\t%s\n' "$id" "$kind" "$status" "$created"
+  done
+}
+
+cmd_result() {
+  local reference="${1:-}"
+  local file result_path
+  if [ -z "$reference" ]; then
+    file="$(ls -t "$JOBS_DIR"/cg-*.env 2>/dev/null | head -1 || true)"
+  else
+    file="$(job_file "$reference")"
+  fi
+  [ -n "${file:-}" ] && [ -f "$file" ] || {
+    echo "No ClaudeGrill job found." >&2
+    return 1
+  }
+  result_path="$(job_value "$file" RESULT_PATH)"
+  if [ ! -s "$result_path" ]; then
+    echo "ClaudeGrill result is not ready yet: $result_path" >&2
+    return 1
+  fi
+  cat "$result_path"
+}
+
+cmd_cancel() {
+  local reference="${1:-}"
+  local file request_path temp_queue
+  [ -n "$reference" ] || {
+    echo "Usage: claudegrill cancel <job-id>" >&2
+    return 2
+  }
+  file="$(job_file "$reference")"
+  [ -f "$file" ] || {
+    echo "No ClaudeGrill job found for: $reference" >&2
+    return 1
+  }
+  request_path="$(job_value "$file" REQUEST_PATH)"
+  touch "$file.cancelled" "$request_path.done"
+  if [ -f "$QUEUE_FILE" ]; then
+    temp_queue="$(mktemp "${TMPDIR:-/tmp}/claudegrill-queue.XXXXXX")"
+    grep -Fvx "$request_path" "$QUEUE_FILE" > "$temp_queue" || true
+    mv "$temp_queue" "$QUEUE_FILE"
+  fi
+  echo "ClaudeGrill job cancelled: $reference"
+}
+
+main() {
+  local command="${1:-help}"
+  shift || true
+
+  case "$command" in
+    setup)
+      cmd_setup "$@"
+      ;;
+    review)
+      run_review_command review "请审查当前项目的计划、diff 或实现。" "$@"
+      ;;
+    adversarial-review)
+      run_review_command adversarial-review "请挑战当前实现方向和设计取舍。" "$@"
+      ;;
+    grill)
+      run_review_command grill "请审查并审批当前方案。" "$@"
+      ;;
+    status)
+      cmd_status "$@"
+      ;;
+    result)
+      cmd_result "$@"
+      ;;
+    cancel)
+      cmd_cancel "$@"
+      ;;
+    help|--help|-h)
+      usage
+      ;;
+    *)
+      echo "Unknown ClaudeGrill command: $command" >&2
+      usage >&2
+      return 2
+      ;;
+  esac
+}
+
+main "$@"
