@@ -5,6 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
 CLAUDE_HOME="${CLAUDE_HOME:-$HOME/.claude}"
 AGENT_HOME="$CODEX_HOME/agent-bridge"
+CODEX_PLUGIN_HOME="$CODEX_HOME/plugins"
 LAUNCH_AGENT_DIR="$HOME/Library/LaunchAgents"
 LAUNCH_AGENT_LABEL="com.claudegrill.agentbridge.claude-review"
 LAUNCH_AGENT_PATH="$LAUNCH_AGENT_DIR/$LAUNCH_AGENT_LABEL.plist"
@@ -23,6 +24,7 @@ require_command bash
 
 mkdir -p \
   "$CODEX_HOME/skills" \
+  "$CODEX_PLUGIN_HOME" \
   "$CLAUDE_HOME/skills" \
   "$AGENT_HOME/logs" \
   "$LAUNCH_AGENT_DIR" \
@@ -31,10 +33,12 @@ mkdir -p \
 rm -rf \
   "$CODEX_HOME/skills/claude-review" \
   "$CODEX_HOME/skills/claude-grill" \
+  "$CODEX_PLUGIN_HOME/claudegrill" \
   "$CLAUDE_HOME/skills/codex-review"
 
 cp -R "$ROOT_DIR/skills/codex/claude-review" "$CODEX_HOME/skills/"
 cp -R "$ROOT_DIR/skills/codex/claude-grill" "$CODEX_HOME/skills/"
+cp -R "$ROOT_DIR/plugins/claudegrill" "$CODEX_PLUGIN_HOME/"
 cp -R "$ROOT_DIR/skills/claude/codex-review" "$CLAUDE_HOME/skills/"
 cp "$ROOT_DIR/bin/agent_bridge_claude_daemon.sh" "$AGENT_HOME/agent_bridge_claude_daemon.sh"
 
@@ -42,6 +46,9 @@ chmod +x \
   "$CODEX_HOME/skills/claude-review/scripts/prepare_claude_review.sh" \
   "$CODEX_HOME/skills/claude-review/scripts/claude_review.sh" \
   "$CODEX_HOME/skills/claude-grill/scripts/claude_grill_round.sh" \
+  "$CODEX_PLUGIN_HOME/claudegrill/skills/claude-review/scripts/prepare_claude_review.sh" \
+  "$CODEX_PLUGIN_HOME/claudegrill/skills/claude-review/scripts/claude_review.sh" \
+  "$CODEX_PLUGIN_HOME/claudegrill/skills/claude-grill/scripts/claude_grill_round.sh" \
   "$CLAUDE_HOME/skills/codex-review/scripts/codex_review.sh" \
   "$AGENT_HOME/agent_bridge_claude_daemon.sh"
 
@@ -65,5 +72,6 @@ fi
 
 echo "ClaudeGrill installed."
 echo "Codex skills: $CODEX_HOME/skills/claude-review, $CODEX_HOME/skills/claude-grill"
+echo "Codex plugin: $CODEX_PLUGIN_HOME/claudegrill"
 echo "Claude skill: $CLAUDE_HOME/skills/codex-review"
 echo "Bridge state: $STATE_DIR"

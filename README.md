@@ -1,3 +1,7 @@
+---
+created: 2026-06-11T20:18
+updated: 2026-07-08T17:39
+---
 # ClaudeGrill
 
 [English](README.md) | [中文](README.zh-CN.md)
@@ -39,10 +43,13 @@ Claude remains read-only. Codex remains responsible for editing files.
 
 The installer copies:
 
+- the Codex plugin package to `${CODEX_HOME:-$HOME/.codex}/plugins/claudegrill`
 - Codex skills to `${CODEX_HOME:-$HOME/.codex}/skills`
 - Claude Code skills to `${CLAUDE_HOME:-$HOME/.claude}/skills`
 - the bridge daemon to `${CODEX_HOME:-$HOME/.codex}/agent-bridge`
 - the LaunchAgent to `~/Library/LaunchAgents/com.claudegrill.agentbridge.claude-review.plist`
+
+The plugin package lives in `plugins/claudegrill`. It mirrors the Codex-side skills in a standard Codex plugin layout, while the legacy skill copy remains in place so existing local prompts keep working.
 
 To test the file copy step without loading the macOS LaunchAgent:
 

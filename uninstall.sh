@@ -14,6 +14,7 @@ fi
 rm -rf \
   "$CODEX_HOME/skills/claude-review" \
   "$CODEX_HOME/skills/claude-grill" \
+  "$CODEX_HOME/plugins/claudegrill" \
   "$CLAUDE_HOME/skills/codex-review" \
   "$CODEX_HOME/agent-bridge/agent_bridge_claude_daemon.sh"
 

@@ -42,6 +42,13 @@ assert_contains() {
   }
 }
 
+assert_not_contains() {
+  if grep -Fq "$2" "$1"; then
+    printf '  unexpected text in %s: %s\n' "$1" "$2"
+    return 1
+  fi
+}
+
 assert_headings_match() {
   local en_file="$1"
   local zh_file="$2"
@@ -97,9 +104,14 @@ test_install_and_uninstall_without_launchagent() {
 
   assert_file "$CODEX_HOME/skills/claude-review/SKILL.md" &&
     assert_file "$CODEX_HOME/skills/claude-grill/SKILL.md" &&
+    assert_file "$CODEX_HOME/plugins/claudegrill/.codex-plugin/plugin.json" &&
+    assert_file "$CODEX_HOME/plugins/claudegrill/skills/claude-review/SKILL.md" &&
+    assert_file "$CODEX_HOME/plugins/claudegrill/skills/claude-grill/SKILL.md" &&
     assert_file "$CLAUDE_HOME/skills/codex-review/SKILL.md" &&
     assert_executable "$CODEX_HOME/skills/claude-review/scripts/prepare_claude_review.sh" &&
     assert_executable "$CODEX_HOME/skills/claude-grill/scripts/claude_grill_round.sh" &&
+    assert_executable "$CODEX_HOME/plugins/claudegrill/skills/claude-review/scripts/prepare_claude_review.sh" &&
+    assert_executable "$CODEX_HOME/plugins/claudegrill/skills/claude-grill/scripts/claude_grill_round.sh" &&
     assert_executable "$CLAUDE_HOME/skills/codex-review/scripts/codex_review.sh" &&
     assert_executable "$CODEX_HOME/agent-bridge/agent_bridge_claude_daemon.sh" || return 1
 
@@ -110,6 +122,7 @@ test_install_and_uninstall_without_launchagent() {
 
   [ ! -e "$CODEX_HOME/skills/claude-grill" ] &&
     [ ! -e "$CODEX_HOME/skills/claude-review" ] &&
+    [ ! -e "$CODEX_HOME/plugins/claudegrill" ] &&
     [ ! -e "$CLAUDE_HOME/skills/codex-review" ]
 }
 
@@ -142,9 +155,10 @@ test_prepare_review_creates_queue_bundle_and_pointer() {
 
 test_install_replaces_existing_skill_dirs() {
   with_test_env reinstall
-  mkdir -p "$CODEX_HOME/skills/claude-grill" "$CODEX_HOME/skills/claude-review" "$CLAUDE_HOME/skills/codex-review"
+  mkdir -p "$CODEX_HOME/skills/claude-grill" "$CODEX_HOME/skills/claude-review" "$CODEX_HOME/plugins/claudegrill" "$CLAUDE_HOME/skills/codex-review"
   touch "$CODEX_HOME/skills/claude-grill/stale-file"
   touch "$CODEX_HOME/skills/claude-review/stale-file"
+  touch "$CODEX_HOME/plugins/claudegrill/stale-file"
   touch "$CLAUDE_HOME/skills/codex-review/stale-file"
 
   CLAUDEGRILL_SKIP_LAUNCH_AGENT=1 "$ROOT_DIR/install.sh" > "$TEST_DIR/install.out" 2> "$TEST_DIR/install.err" || {
@@ -154,6 +168,7 @@ test_install_replaces_existing_skill_dirs() {
 
   [ ! -e "$CODEX_HOME/skills/claude-grill/stale-file" ] &&
     [ ! -e "$CODEX_HOME/skills/claude-review/stale-file" ] &&
+    [ ! -e "$CODEX_HOME/plugins/claudegrill/stale-file" ] &&
     [ ! -e "$CLAUDE_HOME/skills/codex-review/stale-file" ]
 }
 
@@ -335,6 +350,23 @@ test_readme_language_switch_and_structure() {
     assert_contains "$ROOT_DIR/README.zh-CN.md" "CLAUDEGRILL_SKIP_LAUNCH_AGENT=1 ./install.sh"
 }
 
+test_codex_plugin_manifest_is_valid_for_local_plugin() {
+  local manifest="$ROOT_DIR/plugins/claudegrill/.codex-plugin/plugin.json"
+
+  assert_file "$manifest" &&
+    assert_contains "$manifest" '"name": "claudegrill"' &&
+    assert_contains "$manifest" '"skills": "./skills/"' &&
+    assert_contains "$manifest" '"displayName": "ClaudeGrill"' &&
+    assert_contains "$manifest" '"shortDescription": "Ask Claude Code to review or challenge Codex work"' &&
+    assert_contains "$manifest" '"Read"' &&
+    assert_not_contains "$manifest" '"Write"'
+}
+
+test_codex_plugin_skills_match_source_skills() {
+  diff -ru "$ROOT_DIR/skills/codex/claude-review" "$ROOT_DIR/plugins/claudegrill/skills/claude-review" &&
+    diff -ru "$ROOT_DIR/skills/codex/claude-grill" "$ROOT_DIR/plugins/claudegrill/skills/claude-grill"
+}
+
 test_tracked_files_do_not_reference_legacy_project_name() {
   local pattern
   pattern='grill[-_ ]?m''e[-_ ]?codex|grillm''ecodex'
@@ -366,6 +398,8 @@ run_test test_claude_grill_exits_one_for_revise
 run_test test_claude_grill_exits_two_for_blocked
 run_test test_claude_grill_times_out_when_result_missing
 run_test test_readme_language_switch_and_structure
+run_test test_codex_plugin_manifest_is_valid_for_local_plugin
+run_test test_codex_plugin_skills_match_source_skills
 run_test test_tracked_files_do_not_reference_legacy_project_name
 
 printf '\n%s passed, %s failed\n' "$PASS_COUNT" "$FAIL_COUNT"

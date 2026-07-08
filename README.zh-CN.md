@@ -1,3 +1,7 @@
+---
+created: 2026-06-11T20:18
+updated: 2026-07-08T17:39
+---
 # ClaudeGrill
 
 [English](README.md) | [中文](README.zh-CN.md)
@@ -39,10 +43,13 @@ Claude 始终只读审查。真正修改文件的责任仍然在 Codex 这边。
 
 安装脚本会复制：
 
+- Codex 插件包到 `${CODEX_HOME:-$HOME/.codex}/plugins/claudegrill`
 - Codex skills 到 `${CODEX_HOME:-$HOME/.codex}/skills`
 - Claude Code skills 到 `${CLAUDE_HOME:-$HOME/.claude}/skills`
 - 桥接守护进程到 `${CODEX_HOME:-$HOME/.codex}/agent-bridge`
 - LaunchAgent 到 `~/Library/LaunchAgents/com.claudegrill.agentbridge.claude-review.plist`
+
+插件包在 `plugins/claudegrill`。它把 Codex 侧 skills 放进标准 Codex 插件结构里；原来的 skill 复制方式仍然保留，这样已有的本机提示词不会失效。
 
 如果只想测试文件复制，不加载 macOS LaunchAgent：
 

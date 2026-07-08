@@ -1,0 +1,35 @@
+{
+  "name": "claudegrill",
+  "version": "0.2.0",
+  "description": "Use Claude Code from Codex for read-only reviews, adversarial plan checks, and multi-round approval loops.",
+  "author": {
+    "name": "ClaudeGrill contributors"
+  },
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "code-review",
+    "agent-bridge",
+    "review"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ClaudeGrill",
+    "shortDescription": "Ask Claude Code to review or challenge Codex work",
+    "longDescription": "ClaudeGrill lets Codex ask Claude Code for read-only review, adversarial critique, and multi-round plan approval through a local bridge. It keeps Claude in review mode while Codex remains responsible for making changes.",
+    "developerName": "ClaudeGrill contributors",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Ask Claude Code to review my current diff.",
+      "Have Claude Code challenge this plan before I implement it.",
+      "Run a multi-round Claude Code approval loop for this change."
+    ],
+    "brandColor": "#4F46E5",
+    "screenshots": []
+  }
+}
